@@ -28,14 +28,17 @@
     "token:external": "ts-node scripts/generate-local-jwt.ts external"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.970.0",
     "@aws-sdk/client-dynamodb": "^3.485.0",
     "@aws-sdk/client-ssm": "^3.485.0",
     "@aws-sdk/lib-dynamodb": "^3.485.0",
+    "@google/generative-ai": "^0.24.1",
     "@nestjs/common": "^10.0.0",
     "@nestjs/config": "^3.1.1",
     "@nestjs/core": "^10.0.0",
     "@nestjs/passport": "^10.0.3",
     "@nestjs/platform-express": "^10.0.0",
+    "@nestjs/typeorm": "^11.0.0",
     "@opensearch-project/opensearch": "^2.6.0",
     "@willsoto/nestjs-prometheus": "^6.0.0",
     "class-transformer": "^0.5.1",
@@ -44,10 +47,12 @@
     "nestjs-pino": "^3.5.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
+    "pg": "^8.17.1",
     "pino-http": "^8.6.1",
     "prom-client": "^15.1.0",
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.8.1",
+    "typeorm": "^0.3.28",
     "zod": "^3.22.4"
   },
   "devDependencies": {
@@ -59,6 +64,7 @@
     "@types/jsonwebtoken": "^9.0.5",
     "@types/node": "^20.3.1",
     "@types/passport-jwt": "^4.0.1",
+    "@types/pg": "^8.16.0",
     "@types/supertest": "^6.0.3",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",

@@ -1,37 +1,53 @@
-# MemberSearch
+# Secure OpenSearch Discovery
 
-**Secure OpenSearch Discovery API for Protected Membership Data**
+**Multi-Vertical Search & Analysis Platform for Protected Data**
 
-Internal NestJS service providing sub-second fuzzy search over PII-redacted member records, synchronized from DynamoDB via event-driven indexing.
+NestJS service providing sub-second fuzzy search over PII-redacted records from multiple data sources, with LLM-powered analysis and comprehensive guardrails.
 
 ---
 
 ## Problem
 
-Transactional DynamoDB cannot support complex text searches (fuzzy names, status notes). Querying production tables directly impacts write performance and lacks full-text search capabilities.
+Transactional databases (DynamoDB, PostgreSQL) cannot support complex text searches. Querying production tables directly impacts performance and lacks full-text capabilities.
 
 ## Solution
 
-Extract → Redact → Index pipeline that creates a searchable, PII-protected OpenSearch index for internal administrative queries.
+Extract → Redact → Index pipeline creating searchable, PII-protected OpenSearch indices, plus an LLM agent for cross-vertical analysis.
 
 ---
 
-## Non-Goals
+## Verticals
 
-- **Real-time transactional consistency** with DynamoDB (eventual consistency is acceptable)
-- **Member-facing search** — this is an internal administrative tool only
+### Membership (DynamoDB → OpenSearch)
 
----
+| Aspect | Detail |
+|--------|--------|
+| **Source** | DynamoDB (member records) |
+| **Sync** | DynamoDB Streams → Lambda → OpenSearch |
+| **Index** | `members` |
+| **API** | `GET /members/search?q=...` |
+| **Features** | Fuzzy search, RBAC field filtering, PII redaction |
 
-## TL;DR
+### Locations (PostgreSQL → OpenSearch)
 
-- **Source of Truth**: DynamoDB (member records)
-- **Search Layer**: OpenSearch with fuzzy/n-gram analysis
-- **Sync**: DynamoDB Streams → Lambda Indexer → OpenSearch
-- **PII Protection**: Phone/email redacted before indexing
-- **Multi-Tenant**: Internal RCM (RBAC) + External locations (data isolation)
-- **RBAC**: Role-based field filtering (Auditor vs Compliance Lead)
-- **Idempotency**: `member_id` as OpenSearch `_id` (retries are harmless)
+| Aspect | Detail |
+|--------|--------|
+| **Source** | PostgreSQL via TypeORM |
+| **Sync** | Batch reindex on-demand |
+| **Index** | `locations` |
+| **API** | `GET /locations/search?q=...&region=...&rate_model=...` |
+| **Features** | Region/rate model filters, tenant isolation |
+
+**Rate Models:** `standard`, `per_participant`, `conversion_rate`, `new_enrollee`, `admin_enrollee`
+
+### Agent (LLM Analysis + Guardrails)
+
+| Aspect | Detail |
+|--------|--------|
+| **Local** | Gemini API (`gemini-1.5-flash`) |
+| **Production** | AWS Bedrock (Claude 3 Sonnet, IAM auth) |
+| **API** | `POST /agent/analyze` |
+| **Guardrails** | Input validation, prompt injection detection, PII blocking, output validation, rate limiting |
 
 ---
 
@@ -43,14 +59,18 @@ Extract → Redact → Index pipeline that creates a searchable, PII-protected O
 │  (Members)  │                   │  + Redaction    │
 └─────────────┘                   └────────┬────────┘
                                            │
-                                           ▼
-┌─────────────┐                   ┌─────────────────┐
-│  NestJS API │ ◄──── Query ───── │   OpenSearch    │
-│  (Search)   │                   │  (members idx)  │
-└─────────────┘                   └─────────────────┘
+┌─────────────┐     TypeORM               │
+│ PostgreSQL  │ ────────────────────┐     │
+│ (Locations) │                     │     │
+└─────────────┘                     ▼     ▼
+                                ┌─────────────────┐
+┌─────────────┐                 │   OpenSearch    │
+│  NestJS API │ ◄─── Query ──── │  members idx    │
+│  + Agent    │                 │  locations idx  │
+└──────┬──────┘                 └─────────────────┘
        │
-       ▼ RBAC-filtered response
-   [ Client ]
+       ▼ LLM Analysis (Gemini/Bedrock)
+   [ Insight Response ]
 ```
 
 ---
@@ -59,43 +79,16 @@ Extract → Redact → Index pipeline that creates a searchable, PII-protected O
 
 ```
 src/
-├── main.ts                      # Bootstrap (Express or Lambda adapter)
-├── app.module.ts                # Root module
-├── config/
-│   └── config.module.ts         # Environment config with Zod validation
-├── search/
-│   ├── dto/                     # Request/response DTOs
-│   ├── interfaces/              # SearchQuery, SearchResult types
-│   ├── search.module.ts
-│   ├── search.controller.ts     # GET /search endpoint
-│   ├── search.service.ts        # Query building, source filtering
-│   └── opensearch.provider.ts   # Client factory (local vs AWS)
-├── members/
-│   ├── interfaces/              # Member type definition
-│   ├── members.module.ts
-│   └── members.repository.ts    # DynamoDB DocumentClient wrapper
-├── redaction/
-│   ├── redaction.module.ts
-│   └── redaction.service.ts     # PII pattern detection & masking
-├── auth/
-│   ├── dto/                     # AuthenticatedUserDto
-│   ├── interfaces/              # JwtPayload type
-│   ├── auth.module.ts
-│   ├── jwt.strategy.ts          # Passport JWT validation
-│   └── roles.guard.ts           # RBAC enforcement
-└── indexer/
-    ├── dto/                     # ReindexResultDto
-    ├── interfaces/              # IndexDocument, ValidationError
-    ├── indexer.module.ts
-    ├── indexer.controller.ts    # POST /admin/reindex (admin-only)
-    └── indexer.service.ts       # Bulk index with redaction
-
-scripts/
-├── seed.ts                      # Local data seeding
-└── generate-local-jwt.ts        # Mock JWT generation
-
-indexer/                         # Lambda function (separate deploy)
-└── handler.ts                   # DynamoDB Streams consumer
+├── shared/
+│   ├── auth/          # JWT strategy, RBAC guard
+│   ├── opensearch/    # Client provider
+│   └── redaction/     # PII masking
+├── membership/        # DynamoDB → OpenSearch vertical
+├── locations/         # PostgreSQL → OpenSearch vertical
+├── agent/
+│   ├── providers/     # Gemini, Bedrock
+│   └── guardrails/    # Input/output validation
+└── config/            # Environment config
 ```
 
 ---
@@ -105,7 +98,7 @@ indexer/                         # Lambda function (separate deploy)
 | Environment | Purpose | Documentation |
 |-------------|---------|---------------|
 | Local | Docker-based development | [docs/local.md](docs/local.md) |
-| Production | AWS (OpenSearch Service, Lambda, DynamoDB) | [docs/production.md](docs/production.md) |
+| Production | AWS (OpenSearch, Lambda, Bedrock) | [docs/production.md](docs/production.md) |
 | Migration | Switching environments | [docs/migration.md](docs/migration.md) |
 
 ---
@@ -115,30 +108,30 @@ indexer/                         # Lambda function (separate deploy)
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Search Engine | OpenSearch | AWS-managed, fuzzy search, field-level security |
-| Sync Mechanism | DynamoDB Streams | Near real-time, built-in retry, 24h retention |
-| Idempotency | `member_id` = `_id` | Natural deduplication, no external state |
-| PII Handling | Pre-index redaction | Sensitive data never reaches search index |
-| DLQ | SQS | Failed records preserved for replay |
+| Membership Sync | DynamoDB Streams | Near real-time, built-in retry |
+| Locations Sync | Batch reindex | Simpler, controllable |
+| LLM Provider | Gemini (local) / Bedrock (prod) | No API keys in prod (IAM) |
+| Guardrails | Pre/post pipeline | Defense in depth |
 
 ---
 
 ## Quickstart
 
 ```bash
-# 1. Start local infrastructure
+# 1. Start infrastructure
 docker-compose up -d
 
-# 2. Install dependencies
-npm install
+# 2. Install & seed
+npm install && npm run seed
 
-# 3. Seed mock data
-npm run seed
-
-# 4. Start API
+# 3. Start API
 npm run start:dev
 
-# 5. Test search
-curl "http://localhost:3000/search?q=violation"
+# 4. Test Membership search
+curl "http://localhost:3000/members/search?q=John%20Smith"
+
+# 5. Test Locations search
+curl "http://localhost:3000/locations/search?q=Downtown%20Fitness&region=Southeast"
 ```
 
 ---
@@ -152,4 +145,3 @@ curl "http://localhost:3000/search?q=violation"
 - [Observability](docs/observability.md)
 - [Security](docs/security.md)
 - [Scale & Failure Modes](docs/scale.md)
-

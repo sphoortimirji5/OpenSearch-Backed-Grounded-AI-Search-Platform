@@ -1,6 +1,6 @@
 # Observability
 
-Logging, metrics, and monitoring for MemberSearch.
+Logging, metrics, and monitoring for Secure OpenSearch Discovery multi-vertical platform.
 
 ---
 
@@ -60,51 +60,59 @@ PrometheusModule.register({
 });
 ```
 
-### Custom Metrics
+### Accessing Metrics
 
-```typescript
-// search.service.ts
-import { Counter, Histogram } from 'prom-client';
-
-const searchCounter = new Counter({
-  name: 'membersearch_queries_total',
-  help: 'Total number of search requests',
-  labelNames: ['role', 'status'],
-});
-
-const searchDuration = new Histogram({
-  name: 'membersearch_query_duration_seconds',
-  help: 'Search request duration',
-  buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1],
-});
+```bash
+curl http://localhost:3000/metrics
 ```
 
-### Key Metrics
+---
 
-| Metric | Type | Labels |
-|--------|------|--------|
-| `membersearch_queries_total` | Counter | role, status |
-| `membersearch_query_duration_seconds` | Histogram | - |
-| `membersearch_index_operations_total` | Counter | status |
-| `membersearch_dlq_messages_total` | Counter | - |
-| `membersearch_index_lag_seconds` | Gauge | - |
+## Membership Metrics
 
-### Index Lag Metric (CDC Health)
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `membersearch_queries_total` | Counter | role, tenant_type, status | Total member search requests |
+| `membersearch_query_duration_seconds` | Histogram | - | Search latency distribution |
+| `membersearch_index_operations_total` | Counter | status | Document index operations |
+| `membersearch_reindex_total` | Counter | - | Full reindex operations |
 
-```typescript
-// indexer.service.ts
-import { Gauge } from 'prom-client';
+---
 
-const indexLag = new Gauge({
-  name: 'membersearch_index_lag_seconds',
-  help: 'Age of oldest unprocessed DynamoDB stream record',
-});
+## Locations Metrics
 
-// Derived from DynamoDB Streams CloudWatch metric:
-// ApproximateAgeOfOldestRecord
-```
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `locations_queries_total` | Counter | role, status | Total location search requests |
+| `locations_query_duration_seconds` | Histogram | - | Location search latency |
+| `locations_index_operations_total` | Counter | status | Location index operations |
+| `locations_reindex_total` | Counter | - | PostgreSQL→OpenSearch reindex |
 
-This metric directly supports the CDC story. If `membersearch_index_lag_seconds > 5`, the search index is drifting from the source of truth.
+---
+
+## Agent Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `agent_analysis_total` | Counter | provider, status | Total LLM analyses |
+| `agent_analysis_duration_seconds` | Histogram | - | LLM response latency |
+| `agent_guardrails_total` | Counter | type, action | Guardrails pipeline results |
+
+### Guardrails Labels
+
+| type | action | Meaning |
+|------|--------|---------|
+| `input` | `allowed` | Question passed input validation |
+| `input` | `blocked` | Prompt injection or PII detected |
+| `output` | `passed` | LLM response validated |
+| `output` | `fallback` | Fallback response used |
+
+### LLM Provider
+
+| Provider | Environment | Metrics Label |
+|----------|-------------|---------------|
+| Gemini 2.5 Flash | Local | `provider="gemini"` |
+| AWS Bedrock | Production | `provider="bedrock"` |
 
 ---
 
@@ -132,12 +140,25 @@ sdk.start();
 
 ## Service Level Objectives (SLOs)
 
+### Membership Search
 | SLI | Target | Measurement |
 |-----|--------|-------------|
-| Search Availability | 99.9% | Successful responses / total requests |
-| Search Latency (p99) | < 200ms | Histogram percentile |
-| Index Lag | < 5 seconds | Stream age metric |
-| DLQ Empty | 100% | SQS message count = 0 |
+| Availability | 99.9% | Successful responses / total requests |
+| Latency (p99) | < 200ms | `membersearch_query_duration_seconds` |
+| Index Lag | < 5 seconds | DynamoDB Stream age |
+
+### Locations Search
+| SLI | Target | Measurement |
+|-----|--------|-------------|
+| Availability | 99.9% | Successful responses / total requests |
+| Latency (p99) | < 200ms | `locations_query_duration_seconds` |
+
+### Agent Analysis
+| SLI | Target | Measurement |
+|-----|--------|-------------|
+| Availability | 99% | Successful analyses / total requests |
+| Latency (p99) | < 30s | `agent_analysis_duration_seconds` |
+| Guardrails Block Rate | < 5% | `agent_guardrails_total{action="blocked"}` |
 
 ---
 
@@ -160,6 +181,15 @@ sdk.start();
   Threshold: 1
   EvaluationPeriods: 1
 
+# LLM rate limiting
+- AlarmName: AgentHighBlockRate
+  MetricName: agent_guardrails_total
+  Dimensions:
+    - Name: action
+      Value: blocked
+  Threshold: 100  # per minute
+  ComparisonOperator: GreaterThanThreshold
+
 # Index drift detection
 - AlarmName: MemberSearchIndexLag
   MetricName: ApproximateAgeOfOldestRecord
@@ -176,12 +206,13 @@ sdk.start();
 ## Dashboards
 
 ### Grafana (if self-hosting metrics)
-- Search RPS and latency
+- Search RPS and latency by vertical
+- Agent analysis success rate
+- Guardrails block rate
 - Index operations per second
-- DLQ message count
-- OpenSearch cluster health
 
 ### CloudWatch Dashboard
 - Lambda invocations and errors
 - API Gateway latency percentiles
 - OpenSearch domain metrics
+- Bedrock token usage (production)

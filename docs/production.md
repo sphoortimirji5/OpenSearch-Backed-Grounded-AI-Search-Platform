@@ -1,66 +1,65 @@
 # Production Deployment
 
-AWS-based production architecture for MemberSearch.
+AWS-based production architecture for Secure OpenSearch Discovery multi-vertical platform.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                         VPC                                  │
-│  ┌──────────────┐    ┌──────────────┐    ┌───────────────┐ │
-│  │   DynamoDB   │───►│    Lambda    │───►│  OpenSearch   │ │
-│  │   + Streams  │    │   Indexer    │    │   Service     │ │
-│  └──────────────┘    └──────┬───────┘    └───────────────┘ │
-│                             │                    ▲          │
-│                             ▼                    │          │
-│                      ┌──────────────┐            │          │
-│                      │   SQS DLQ    │            │          │
-│                      └──────────────┘            │          │
-│                                                  │          │
-│  ┌──────────────┐    ┌──────────────┐           │          │
-│  │ API Gateway  │───►│  ECS/Lambda  │───────────┘          │
-│  │   + Cognito  │    │  NestJS API  │                      │
-│  └──────────────┘    └──────────────┘                      │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                              VPC                                      │
+│                                                                       │
+│  ┌─────────────┐    ┌─────────────┐    ┌──────────────────────────┐ │
+│  │  DynamoDB   │───►│   Lambda    │───►│                          │ │
+│  │  + Streams  │    │  Indexer    │    │      OpenSearch          │ │
+│  └─────────────┘    └─────────────┘    │       Service            │ │
+│                                        │                          │ │
+│  ┌─────────────┐    ┌─────────────┐    │   members index          │ │
+│  │ PostgreSQL  │───►│ ECS/Lambda  │───►│   locations index        │ │
+│  │    (RDS)    │    │  Indexer    │    │                          │ │
+│  └─────────────┘    └─────────────┘    └──────────────────────────┘ │
+│                                                     ▲                │
+│                                                     │                │
+│  ┌─────────────┐    ┌─────────────┐    ┌──────────┴───────────┐    │
+│  │    API      │───►│    ECS      │───►│      Bedrock         │    │
+│  │  Gateway    │    │  NestJS     │    │  (Claude/Titan)      │    │
+│  │  + Cognito  │    │    API      │    └──────────────────────┘    │
+│  └─────────────┘    └─────────────┘                                 │
+│                           │                                          │
+│                     ┌─────┴─────┐                                   │
+│                     │  SQS DLQ  │                                   │
+│                     └───────────┘                                   │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Components
 
-### DynamoDB
-- **Table**: `members`
-- **Stream**: NEW_AND_OLD_IMAGES (for change detection)
-- **Partition Key**: `member_id`
+### Membership Vertical
 
-### Lambda Indexer
-- **Trigger**: DynamoDB Streams
-- **Batch Size**: 100 records
-- **Retry**: 3 attempts with bisect on error
-- **DLQ**: SQS queue for failed records
+| Component | Service | Purpose |
+|-----------|---------|---------|
+| Source | DynamoDB | Member records |
+| Sync | DynamoDB Streams + Lambda | Real-time CDC |
+| Index | OpenSearch `members` | Fuzzy search |
 
-### OpenSearch Service
-- **Domain**: `membersearch`
-- **Instance**: `r6g.large.search` (production)
-- **Access**: VPC endpoint, IAM signing
-- **Index**: `members` with custom analyzers
+### Locations Vertical
 
-### NestJS API
-- **Deployment**: ECS Fargate or Lambda (via `@vendia/serverless-express`)
-- **Auth**: Cognito JWT via API Gateway authorizer
-- **Networking**: VPC with OpenSearch access
+| Component | Service | Purpose |
+|-----------|---------|---------|
+| Source | RDS PostgreSQL | Location records |
+| Sync | Scheduled Lambda / ECS Task | Batch reindex |
+| Index | OpenSearch `locations` | Filter by region/rate |
 
-### Index Lifecycle Management
+### Agent Vertical
 
-| Aspect | Strategy | Rationale |
-|--------|----------|-----------|
-| **Sharding** | 1 primary, 1 replica | Sufficient for <10M documents; adjust if growth exceeds |
-| **Rollover** | Not required initially | Single index; implement when index size exceeds 50GB |
-| **Retention** | Indefinite (sync with DynamoDB) | Soft deletes via TTL if needed |
-
-Index lifecycle policies (ILM) can be added later if data volume grows. For now, a single `members` index with alias-based reindexing is sufficient.
+| Component | Service | Purpose |
+|-----------|---------|---------|
+| LLM | AWS Bedrock | Claude/Titan inference |
+| Auth | IAM Task Roles | No API keys needed |
+| Guardrails | Built-in | Input/output validation |
 
 ---
 
@@ -71,13 +70,22 @@ Index lifecycle policies (ILM) can be added later if data volume grows. For now,
 OPENSEARCH_NODE=https://membersearch.us-east-1.es.amazonaws.com
 AWS_REGION=us-east-1
 JWT_ISSUER=https://cognito-idp.us-east-1.amazonaws.com/<pool-id>
+
+# PostgreSQL (Locations)
+POSTGRES_HOST=membersearch-locations.xxx.us-east-1.rds.amazonaws.com
+POSTGRES_PORT=5432
+POSTGRES_DB=locations
+
+# LLM (Agent)
+LLM_PROVIDER=bedrock
+BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
 ```
 
 ---
 
 ## IAM Policies
 
-### Lambda Indexer
+### Lambda Indexer (Membership)
 ```json
 {
   "Effect": "Allow",
@@ -97,6 +105,24 @@ JWT_ISSUER=https://cognito-idp.us-east-1.amazonaws.com/<pool-id>
   "Effect": "Allow",
   "Action": ["es:ESHttpGet", "es:ESHttpPost", "es:ESHttpPut"],
   "Resource": "arn:aws:es:*:*:domain/membersearch/*"
+}
+```
+
+### Bedrock Access (Agent)
+```json
+{
+  "Effect": "Allow",
+  "Action": ["bedrock:InvokeModel"],
+  "Resource": "arn:aws:bedrock:*:*:foundation-model/anthropic.claude*"
+}
+```
+
+### RDS Access (Locations)
+```json
+{
+  "Effect": "Allow",
+  "Action": ["rds-db:connect"],
+  "Resource": "arn:aws:rds-db:*:*:dbuser:*/locations_reader"
 }
 ```
 
@@ -124,6 +150,28 @@ docker push <account>.dkr.ecr.<region>.amazonaws.com/membersearch-api:latest
 terraform apply
 ```
 
+### Locations Sync (Scheduled)
+```yaml
+# serverless.yml
+functions:
+  locationsReindex:
+    handler: src/locations/reindex.handler
+    events:
+      - schedule: rate(1 hour)
+    environment:
+      POSTGRES_HOST: ${ssm:/membersearch/prod/postgres/host}
+```
+
+---
+
+## Index Lifecycle Management
+
+| Aspect | Strategy | Rationale |
+|--------|----------|-----------|
+| **Sharding** | 1 primary, 1 replica | Sufficient for <10M documents |
+| **Rollover** | Not required initially | Single index per vertical |
+| **Retention** | Indefinite | Sync with source systems |
+
 ---
 
 ## Monitoring
@@ -134,3 +182,5 @@ terraform apply
 | Lambda Errors | CloudWatch | > 1% error rate |
 | OpenSearch Cluster Health | OpenSearch | Yellow/Red |
 | API p99 Latency | API Gateway | > 500ms |
+| Bedrock Throttling | CloudWatch | > 0 |
+| Agent Guardrails Blocks | Custom Metrics | > 10% |

@@ -270,6 +270,181 @@ Application-layer filtering is the primary enforcement. The `getSourceFilter()` 
 
 ---
 
+## LLM Guardrails (Agent Vertical)
+
+Defense-in-depth security for the Agent's LLM integration.
+
+### Guardrails Pipeline
+
+```
+User Question → [Input Validation] → [Prompt Injection Detection] → [PII Scan]
+                        ↓
+              [LLM Provider] (Gemini/Bedrock)
+                        ↓
+           [Output Validation] → [Response Sanitization] → User Response
+```
+
+### Input Validation
+
+```typescript
+// input-validator.ts
+const questionSchema = z.object({
+  question: z.string()
+    .min(3, 'Question too short')
+    .max(5000, 'Question too long')
+    .refine((q) => !containsCodeBlock(q), 'Code blocks not allowed'),
+});
+```
+
+| Check | Action | Reason |
+|-------|--------|--------|
+| Min length (3 chars) | Reject | Prevent empty/trivial queries |
+| Max length (5000 chars) | Reject | Prevent token bombing |
+| Whitespace normalization | Sanitize | Clean input before LLM |
+
+### Prompt Injection Detection
+
+Blocks attempts to manipulate the LLM's behavior:
+
+```typescript
+// prompt-injection.ts
+const INJECTION_PATTERNS = [
+  /ignore\s+(all\s+)?(previous|prior|above)\s+(instructions|context)/i,
+  /you\s+are\s+(now\s+)?(?:a|an)\s+/i,  // Role reassignment
+  /pretend\s+(you're|to\s+be|that)/i,
+  /system\s*prompt/i,
+  /\bDAN\b/i,  // "Do Anything Now" jailbreak
+];
+```
+
+| Pattern Type | Example | Action |
+|--------------|---------|--------|
+| Instruction Override | "Ignore previous instructions" | Block (400) |
+| Role Reassignment | "You are now an evil AI" | Block (400) |
+| Jailbreak | "DAN mode enabled" | Block (400) |
+| Data Exfiltration | "Send data to http://..." | Block (400) |
+
+### PII Scanning
+
+Scans both input questions AND LLM responses:
+
+```typescript
+// pii-scanner.ts
+const PII_PATTERNS = [
+  { name: 'SSN', regex: /\b\d{3}[-.]?\d{2}[-.]?\d{4}\b/g },
+  { name: 'Credit Card', regex: /\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b/g },
+  { name: 'Email', regex: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g },
+];
+```
+
+| Direction | Action | Reason |
+|-----------|--------|--------|
+| Input → LLM | Block if PII detected | Prevent PII from reaching LLM provider |
+| LLM → Response | Redact if PII found | Prevent PII leakage in responses |
+
+### Output Validation
+
+```typescript
+// output-validator.ts
+const responseSchema = z.object({
+  summary: z.string().max(10000),
+  confidence: z.enum(['high', 'medium', 'low']),
+  reasoning: z.string().optional(),
+});
+```
+
+| Check | Action | Reason |
+|-------|--------|--------|
+| Schema validation | Fallback response | Prevent malformed output |
+| Max length | Truncate | Prevent response flooding |
+| Content safety | Redact/fallback | Block harmful content |
+
+### Rate Limiting
+
+Per-user rate limiting for LLM abuse prevention:
+
+```typescript
+// rate-limiter.ts
+const rateLimiter = new RateLimiter({
+  windowMs: 60_000,        // 1 minute window
+  maxRequests: 10,         // 10 requests per minute
+  maxConcurrent: 2,        // 2 concurrent requests
+});
+```
+
+| Limit | Value | Reason |
+|-------|-------|--------|
+| Per-minute requests | 10 | Prevent quota abuse |
+| Concurrent requests | 2 | Prevent request flooding |
+| Question length | 5000 chars | Prevent token bombing |
+
+### LLM Grounding Strategy
+
+The Agent is grounded exclusively in live search results from OpenSearch.
+
+**Data flow:**
+
+1. Query OpenSearch for members and locations
+2. Build a text context from search results
+3. Redact PII before any LLM interaction
+4. Invoke the LLM using the redacted context
+5. Verify the LLM response against the same redacted context
+
+```typescript
+// agent.service.ts
+const groundingResult = await this.grounding.check(
+  redactedContext,
+  llmResult.summary
+);
+```
+
+> [!IMPORTANT]
+> The grounding context is NOT a curated summary store. It is the live, redacted search results that the LLM received.
+
+### Grounding Verification
+
+Validates that LLM responses are factually grounded in source data (prevents hallucinations):
+
+```typescript
+// grounding.service.ts
+async check(context: string, response: string): Promise<GroundingResult> {
+    const auditResult = await this.llmProvider.analyze('Grounding Audit', prompt);
+    return {
+        grounded: parsed.grounded && parsed.score >= 0.8,
+        score: parsed.score,
+        reason: parsed.reason,
+    };
+}
+```
+
+| Score | Meaning |
+|-------|---------|
+| 0.9-1.0 | Every claim directly supported by facts |
+| 0.8-0.9 | Claims mostly supported, minor inferences |
+| 0.5-0.7 | Some claims lack direct support |
+| 0.0-0.4 | Significant claims unsupported/fabricated |
+
+### LLM Provider Security
+
+| Provider | Authentication | Key Storage |
+|----------|---------------|-------------|
+| Gemini (local) | API Key | `.env.local` (gitignored) |
+| Bedrock (production) | IAM Task Role | No keys needed |
+
+**Production Bedrock IAM Policy:**
+```json
+{
+  "Effect": "Allow",
+  "Action": ["bedrock:InvokeModel"],
+  "Resource": [
+    "arn:aws:bedrock:*:*:foundation-model/anthropic.claude*",
+    "arn:aws:bedrock:*:*:foundation-model/amazon.titan*"
+  ]
+}
+```
+
+---
+
 ## PII Protection
 
 ### Pre-Index Redaction
@@ -335,14 +510,28 @@ export class AuditInterceptor implements NestInterceptor {
 
 ## Security Checklist
 
+### Infrastructure
 - [ ] All secrets in SSM Parameter Store (SecureString)
 - [ ] KMS CMK with key rotation enabled
 - [ ] DynamoDB encryption at rest enabled
 - [ ] OpenSearch encryption at rest + node-to-node
 - [ ] VPC endpoints for all AWS services (no public internet)
 - [ ] Security groups with minimal ingress
+- [ ] TLS 1.2+ enforced everywhere
+
+### Authentication & Authorization
 - [ ] IAM roles with least privilege
 - [ ] JWT validation with Cognito JWKS
+- [ ] RBAC field filtering enforced in API layer
+
+### Data Protection
 - [ ] PII redaction before indexing
 - [ ] CloudTrail enabled for audit
-- [ ] TLS 1.2+ enforced everywhere
+
+### LLM Guardrails (Agent Vertical)
+- [ ] Input validation (length, format)
+- [ ] Prompt injection detection enabled
+- [ ] PII scanning on input AND output
+- [ ] Output schema validation
+- [ ] Per-user rate limiting
+- [ ] Bedrock IAM authentication (no API keys in production)
