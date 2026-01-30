@@ -8,6 +8,13 @@ NestJS service providing sub-second fuzzy search over PII-redacted records from 
 
 ## Problem
 
+Healthcare companies partner with fitness networks (gyms, wellness centers) to provide members with access to exercise facilities as part of their health plans. This involves:
+
+- **Members:** Health plan enrollees who use contracted gym locations
+- **Locations:** Fitness facilities (gyms, studios) with contractual relationships to the company
+- **Business Need:** Understand enrollment trends, location utilization, and member engagement to optimize network contracts and improve health outcomes
+
+**Technical challenges:**
 1. **Search:** Transactional databases (DynamoDB, PostgreSQL) lack full-text search capabilities
 2. **Insights:** Raw data requires manual analysis; no intelligent summarization or cross-vertical reasoning
 
