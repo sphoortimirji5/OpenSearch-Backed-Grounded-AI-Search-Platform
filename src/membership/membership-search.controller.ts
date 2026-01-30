@@ -41,7 +41,7 @@ export class MembershipSearchController {
     @ApiQuery({ name: 'q', required: false, example: 'john', description: 'Search query (name, notes)' })
     @ApiQuery({ name: 'member_id', required: false, example: 'mem-003', description: 'Exact member ID lookup' })
     @ApiQuery({ name: 'email', required: false, example: 'john.doe@example.com', description: 'Exact email match' })
-    @ApiQuery({ name: 'fuzzy', required: false, example: 'true', description: 'Enable fuzzy matching' })
+    @ApiQuery({ name: 'fuzzy', required: false, example: 'true', description: 'Enable fuzzy matching (default: true). Set to "false" for exact match.' })
     @ApiQuery({ name: 'limit', required: false, example: '10', description: 'Max results (default: 20)' })
     async search(
         @Query('q') q?: string,

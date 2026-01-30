@@ -116,7 +116,7 @@ export class MembershipSearchService {
                 return {
                     multi_match: {
                         query: q,
-                        fields: ['fname^2', 'lname^2', 'email', 'status_notes'],
+                        fields: ['member_id^3', 'fname^2', 'lname^2', 'email', 'status_notes'],
                         fuzziness: 'AUTO',
                         prefix_length: 2,
                     },
@@ -125,7 +125,7 @@ export class MembershipSearchService {
             return {
                 multi_match: {
                     query: q,
-                    fields: ['fname', 'lname', 'email', 'status_notes'],
+                    fields: ['member_id', 'fname', 'lname', 'email', 'status_notes'],
                 },
             };
         }
