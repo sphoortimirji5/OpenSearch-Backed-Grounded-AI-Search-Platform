@@ -96,7 +96,14 @@ export class MembershipSearchService {
      * Constructs the user's search query (without tenant filtering).
      */
     private buildUserQuery(params: SearchQuery): Record<string, unknown> {
-        const { q, email, fuzzy = true } = params;
+        const { q, member_id, email, fuzzy = true } = params;
+
+        // Exact member_id lookup takes highest precedence
+        if (member_id) {
+            return {
+                term: { member_id: member_id },
+            };
+        }
 
         if (email) {
             return {

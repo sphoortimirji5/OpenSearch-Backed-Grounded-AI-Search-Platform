@@ -11,6 +11,9 @@ export interface SearchQuery {
     /** Free-text query string for fuzzy matching */
     q?: string;
 
+    /** Exact member ID lookup */
+    member_id?: string;
+
     /** Exact email match (takes precedence over q) */
     email?: string;
 

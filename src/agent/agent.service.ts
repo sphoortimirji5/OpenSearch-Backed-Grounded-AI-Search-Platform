@@ -253,14 +253,40 @@ ${request.locationId ? `FOCUS: Location ID ${request.locationId}` : ''}
         if (members.length === 0) return 'No membership records found.';
 
         const byStatus: Record<string, number> = {};
-        members.forEach((m: unknown) => {
-            const member = m as { status_notes?: string };
+        const byTags: Record<string, number> = {};
+
+        // Build safe sample records without PII
+        const safeRecords = members.slice(0, 5).map((m: unknown) => {
+            const member = m as {
+                member_id?: string;
+                status_notes?: string;
+                tags?: string[];
+                location_id?: string;
+                monthly_visits?: number;
+            };
+
             const status = member.status_notes?.split(' ')[0] || 'unknown';
             byStatus[status] = (byStatus[status] || 0) + 1;
+
+            // Count tags
+            member.tags?.forEach(tag => {
+                byTags[tag] = (byTags[tag] || 0) + 1;
+            });
+
+            // Return only non-PII fields
+            return {
+                member_id: member.member_id,
+                tags: member.tags,
+                location_id: member.location_id,
+                monthly_visits: member.monthly_visits,
+                // Redact PII from status_notes (phone numbers, emails already handled by redaction)
+                status_notes: member.status_notes,
+            };
         });
 
         return `Status distribution: ${JSON.stringify(byStatus)}
-Sample records: ${JSON.stringify(members.slice(0, 5))}`;
+Tags distribution: ${JSON.stringify(byTags)}
+Sample records (PII redacted): ${JSON.stringify(safeRecords)}`;
     }
 
     private summarizeLocations(locations: unknown[]): string {

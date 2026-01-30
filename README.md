@@ -114,9 +114,9 @@ POST /agent/analyze
 # Response
 {
   "question": "Which members are at-risk and need follow-up?",
-  "summary": "Bob Wilson (member_id: mem-003) is identified as an at-risk member [mem-003].",
+  "summary": "Member mem-003 is identified as at-risk based on status tags [mem-003].",
   "confidence": "high",
-  "reasoning": "The MEMBERSHIP DATA contains a record for 'Bob Wilson' with member_id 'mem-003' and includes 'at-risk' in his tags [mem-003].",
+  "reasoning": "The MEMBERSHIP DATA contains a record with member_id 'mem-003' tagged as 'at-risk' [mem-003].",
   "dataPoints": {
     "membersAnalyzed": 10,
     "locationsAnalyzed": 8

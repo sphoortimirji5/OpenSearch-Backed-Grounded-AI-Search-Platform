@@ -34,13 +34,18 @@ export class MembershipSearchController {
     @Get()
     @UseGuards(AuthGuard('jwt'))
     @ApiBearerAuth()
-    @ApiOperation({ summary: 'Search for members', description: 'Search members by name, email, or status notes' })
+    @ApiOperation({
+        summary: 'Search for members',
+        description: 'Search members by name, email, member_id, or status notes. Priority order: member_id > email > q (only highest priority param is used)'
+    })
     @ApiQuery({ name: 'q', required: false, example: 'john', description: 'Search query (name, notes)' })
+    @ApiQuery({ name: 'member_id', required: false, example: 'mem-003', description: 'Exact member ID lookup' })
     @ApiQuery({ name: 'email', required: false, example: 'john.doe@example.com', description: 'Exact email match' })
     @ApiQuery({ name: 'fuzzy', required: false, example: 'true', description: 'Enable fuzzy matching' })
     @ApiQuery({ name: 'limit', required: false, example: '10', description: 'Max results (default: 20)' })
     async search(
         @Query('q') q?: string,
+        @Query('member_id') member_id?: string,
         @Query('email') email?: string,
         @Query('fuzzy') fuzzy?: string,
         @Query('limit') limit?: string,
@@ -48,6 +53,7 @@ export class MembershipSearchController {
     ): Promise<SearchResult[]> {
         const query: SearchQuery = {
             q,
+            member_id,
             email,
             fuzzy: fuzzy !== 'false',
             limit: limit ? parseInt(limit, 10) : undefined,
