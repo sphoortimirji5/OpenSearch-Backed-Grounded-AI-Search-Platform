@@ -66,11 +66,49 @@ Extract → Redact → Index pipeline creating searchable, PII-protected OpenSea
                                 ┌─────────────────┐
 ┌─────────────┐                 │   OpenSearch    │
 │  NestJS API │ ◄─── Query ──── │  members idx    │
-│  + Agent    │                 │  locations idx  │
+│             │                 │  locations idx  │
 └──────┬──────┘                 └─────────────────┘
        │
-       ▼ LLM Analysis (Gemini/Bedrock)
-   [ Insight Response ]
+       ▼
+┌──────────────────────────────────────────────────┐
+│  Agent Pipeline                                  │
+│  ┌──────────┐   ┌─────────────┐   ┌───────────┐ │
+│  │ Guardrails│──▶│ LLM Provider│──▶│ Grounding │ │
+│  │ (Pre)    │   │ Gemini/     │   │ Service   │ │
+│  └──────────┘   │ Bedrock     │   └─────┬─────┘ │
+│                 └─────────────┘         │       │
+│                       ▲                 ▼       │
+│                       │        [Score + Verdict]│
+│            Circuit Breaker                      │
+└──────────────────────────────────────────────────┘
+       │
+       ▼
+  [ Grounded Response ]
+```
+
+---
+
+## Queries & Inference
+
+### Inference Flow
+
+Query → RBAC Filter → PII Redaction → LLM Analysis → Grounding Check → Response
+
+### Agent Analysis
+
+```bash
+POST /agent/analyze
+{
+  "question": "What are the enrollment trends for Q4?"
+}
+
+# Response
+{
+  "summary": "Q4 showed 15% increase in enrollments [mem-001, mem-042]...",
+  "confidence": "high",
+  "reasoning": "Based on 47 member records with enrollment dates in Oct-Dec, comparing to 41 records in Q3.",
+  "provider": "bedrock"
+}
 ```
 
 ---

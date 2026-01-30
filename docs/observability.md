@@ -103,6 +103,14 @@ PinoModule.forRoot({
 | `agent_analysis_total` | Counter | provider, status | LLM analyses |
 | `agent_analysis_duration_seconds` | Histogram | - | LLM response latency |
 | `agent_guardrails_total` | Counter | type, action | Guardrail pipeline results |
+| `agent_grounding_total` | Counter | result | Grounding pass/fail |
+| `grounding_score` | Histogram | - | Score distribution for threshold tuning |
+| `grounding_check_duration_seconds` | Histogram | - | Grounding verification latency |
+| `grounding_errors_total` | Counter | error_type | Grounding failures by type |
+| `llm_tokens_total` | Counter | type, model | Token usage for cost tracking |
+| `llm_errors_total` | Counter | error_type, model | LLM failures by type |
+| `llm_circuit_breaker_state` | Gauge | provider | Circuit state (0=closed, 1=open, 2=half-open) |
+| `llm_circuit_breaker_events_total` | Counter | provider, event | Circuit events (open/close/halfOpen/fallback/timeout) |
 
 ### Prometheus Configuration
 

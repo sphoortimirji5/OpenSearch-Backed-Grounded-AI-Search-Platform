@@ -14,6 +14,25 @@
 
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { LLMProvider } from '../interfaces';
+import { Histogram, Counter } from 'prom-client';
+
+const groundingScoreHistogram = new Histogram({
+    name: 'grounding_score',
+    help: 'Distribution of grounding scores for threshold analysis',
+    buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+});
+
+const groundingDuration = new Histogram({
+    name: 'grounding_check_duration_seconds',
+    help: 'Time spent on grounding verification',
+    buckets: [0.5, 1, 2, 5, 10],
+});
+
+const groundingErrors = new Counter({
+    name: 'grounding_errors_total',
+    help: 'Grounding check failures by type',
+    labelNames: ['error_type'],
+});
 
 export interface GroundingResult {
     grounded: boolean;
@@ -39,12 +58,20 @@ export class GroundingService {
      * @returns GroundingResult with grounded status, score, and reason
      */
     async check(context: string, response: string): Promise<GroundingResult> {
+        const timer = groundingDuration.startTimer();
         const prompt = this.buildAuditPrompt(context, response);
 
         try {
             const auditResult = await this.llmProvider.analyze('Grounding Audit', prompt);
-            return this.parseAuditResult(auditResult);
+            const result = this.parseAuditResult(auditResult);
+
+            // Record score distribution for threshold analysis
+            groundingScoreHistogram.observe(result.score);
+
+            return result;
         } catch (error) {
+            const errorType = error instanceof Error ? error.name : 'unknown';
+            groundingErrors.inc({ error_type: errorType });
             this.logger.error({ msg: 'Grounding check failed', error });
             // On failure, default to ungrounded to be safe
             return {
@@ -52,6 +79,8 @@ export class GroundingService {
                 score: 0,
                 reason: 'Grounding verification failed',
             };
+        } finally {
+            timer();
         }
     }
 

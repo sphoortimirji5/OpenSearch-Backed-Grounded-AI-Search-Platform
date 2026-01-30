@@ -40,6 +40,18 @@ const groundingCounter = new Counter({
     labelNames: ['result'],
 });
 
+const llmTokensCounter = new Counter({
+    name: 'llm_tokens_total',
+    help: 'LLM token usage for cost tracking',
+    labelNames: ['type', 'model'],
+});
+
+const llmErrorsCounter = new Counter({
+    name: 'llm_errors_total',
+    help: 'LLM call failures by error type',
+    labelNames: ['error_type', 'model'],
+});
+
 export interface AnalyzeRequest {
     question: string;
     locationId?: string;

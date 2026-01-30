@@ -53,6 +53,7 @@ export class MembershipRepository {
 
         const client = new DynamoDBClient({
             region,
+            maxAttempts: 3, // Retry with exponential backoff on transient failures
             ...(endpoint && { endpoint }),
         });
 
