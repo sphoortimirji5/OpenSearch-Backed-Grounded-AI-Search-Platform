@@ -249,57 +249,46 @@ ${request.locationId ? `FOCUS: Location ID ${request.locationId}` : ''}
 `;
     }
 
-    private summarizeMembers(members: unknown[]): string {
+    private summarizeMembers(members: any[]): string {
         if (members.length === 0) return 'No membership records found.';
 
         const byStatus: Record<string, number> = {};
         const byTags: Record<string, number> = {};
 
-        // Build safe sample records without PII
-        const safeRecords = members.slice(0, 5).map((m: unknown) => {
-            const member = m as {
-                member_id?: string;
-                status_notes?: string;
-                tags?: string[];
-                location_id?: string;
-                monthly_visits?: number;
-            };
-
-            const status = member.status_notes?.split(' ')[0] || 'unknown';
+        // Calculate distributions over ALL retrieved records
+        members.forEach((m: any) => {
+            const status = m.status_notes?.split(' ')[0] || 'unknown';
             byStatus[status] = (byStatus[status] || 0) + 1;
 
-            // Count tags
-            member.tags?.forEach(tag => {
+            m.tags?.forEach((tag: string) => {
                 byTags[tag] = (byTags[tag] || 0) + 1;
             });
-
-            // Return only non-PII fields
-            return {
-                member_id: member.member_id,
-                tags: member.tags,
-                location_id: member.location_id,
-                monthly_visits: member.monthly_visits,
-                // Redact PII from status_notes (phone numbers, emails already handled by redaction)
-                status_notes: member.status_notes,
-            };
         });
+
+        // Build safe sample records (up to 50 to fit in context)
+        const safeRecords = members.slice(0, 50).map((m: any) => ({
+            member_id: m.member_id,
+            tags: m.tags,
+            location_id: m.location_id,
+            monthly_visits: m.monthly_visits,
+            status_notes: m.status_notes, // Redaction service handles this later
+        }));
 
         return `Status distribution: ${JSON.stringify(byStatus)}
 Tags distribution: ${JSON.stringify(byTags)}
-Sample records (PII redacted): ${JSON.stringify(safeRecords)}`;
+Records (PII redacted): ${JSON.stringify(safeRecords)}`;
     }
 
-    private summarizeLocations(locations: unknown[]): string {
+    private summarizeLocations(locations: any[]): string {
         if (locations.length === 0) return 'No location records found.';
 
         const byRegion: Record<string, number> = {};
-        locations.forEach((l: unknown) => {
-            const loc = l as { region?: string };
-            const region = loc.region || 'unknown';
+        locations.forEach((l: any) => {
+            const region = l.metadata?.region || 'unknown';
             byRegion[region] = (byRegion[region] || 0) + 1;
         });
 
         return `Region distribution: ${JSON.stringify(byRegion)}
-Sample records: ${JSON.stringify(locations.slice(0, 3))}`;
+Records: ${JSON.stringify(locations.slice(0, 20))}`;
     }
 }
